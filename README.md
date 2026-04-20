@@ -1,6 +1,4 @@
-Here’s your README with **clean Markdown formatting** (headings, bullets, spacing). You can paste this directly into `README.md`.
 
----
 
 # STARAI-ICU-Alarm
 
