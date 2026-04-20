@@ -1,151 +1,117 @@
-# STARAI-ICU-Alarm
+STARAI-ICU-Alarm
 
-This project was built for the STAR AI Data Competition (Track 4), where the goal is to predict ICU patient mortality using high-resolution physiological data. The competition focuses on real-world clinical challenges, especially how to make predictions that are not only accurate but also useful in practice, where false alarms and unreliable predictions can have serious consequences.
+This project was built for the STAR AI Data Competition (Track 4), where the goal is to predict ICU patient mortality using high-resolution physiological data from the HiRID dataset.
 
-Instead of just training a model and reporting accuracy, this project is designed as a full pipeline that tries to reflect how a system like this would actually be used in a hospital setting. That includes not only predicting mortality, but also measuring uncertainty, simulating alarm policies, and analyzing fairness across different patient groups.
+The main idea behind this project is not just to build a model that predicts whether a patient will die, but to think about how that prediction would actually be used in a real ICU. That means looking at things like uncertainty, alarm fatigue, and fairness, not just accuracy.
 
-The core idea is to move beyond a single prediction and think about how decisions are made from those predictions.
+What this project does
 
----
+At a high level, the pipeline:
 
-## What the project does
+takes raw ICU time-series data (vitals, labs, etc.)
+converts it into structured features for each patient
+trains a model to predict mortality
+evaluates how reliable those predictions are
+simulates how alerts would be triggered
+checks if the model performs differently across patient groups
 
-At a high level, the pipeline takes ICU patient data, processes it into features, trains a model to predict mortality, and then adds additional layers to evaluate how reliable and clinically useful those predictions are.
+So instead of just outputting a prediction, the system tries to answer:
+can we trust this prediction, and should we act on it?
 
-The main components are:
+Pipeline overview
+1. Data processing
 
-* A mortality prediction model trained on ICU time-series data
-* An uncertainty module that flags predictions the model is not confident about
-* An alarm policy engine that simulates when alerts would be triggered
-* A fairness analysis that checks performance across subgroups
+The HiRID dataset is very large, so it’s read in chunks instead of all at once. The data is resampled into 2-minute windows to reduce noise and better match how ICU monitoring systems work.
 
-This structure follows the STAR AI competition guidelines, where teams are encouraged to think about deterioration signals, alarm burden, and real-world usability instead of just leaderboard performance.
-
----
-
-## How this relates to STAR AI
-
-The STAR AI competition evaluates models based on AUC for mortality prediction, but also emphasizes deeper analysis such as early warning signals, alarm fatigue, and system reliability.
-
-This project aligns with that by:
-
-* Predicting mortality as the main task (competition target)
-* Incorporating uncertainty to identify unreliable predictions
-* Simulating alarm policies to study tradeoffs between sensitivity and false alarms
-* Analyzing fairness across patient subgroups
-
-The goal is not just to get a strong AUC, but to understand how the model behaves and how it would perform in a real ICU environment.
-
----
-
-## Pipeline overview
-
-The pipeline is structured as a sequence of steps:
-
-1. Data loading
-   Patient data is loaded from preprocessed HiRID files. These include time-series vital signs and clinical measurements.
+Basic patient info like age and sex is also added here.
 
 2. Feature engineering
-   Raw time-series data is aggregated into features that summarize each patient’s ICU stay. This includes statistics like averages, trends, and variability.
+
+Each patient has a different length of stay, so the time-series data is converted into a fixed set of features.
+
+These include:
+
+mean, min, max, standard deviation
+trends over time (slopes)
+missingness (how often a variable is recorded)
+clinical flags like low blood pressure or oxygen
+
+The idea is to summarize each patient’s condition in a way that still reflects real clinical signals.
 
 3. Model training
-   A gradient boosting model (LightGBM-style) is trained to predict whether a patient dies during their ICU stay.
 
-4. Prediction
-   The trained model is used to generate probabilities for mortality on validation or test data.
+A gradient boosting model (LightGBM) is trained using 5-fold cross-validation.
 
-5. Uncertainty estimation
-   Multiple models (e.g., cross-validation folds) are compared to measure disagreement. High disagreement indicates uncertainty, and those cases can be flagged for human review.
+the dataset is imbalanced (~6% mortality), so class weights are used
+a logistic regression model is also trained as a baseline
+predictions from both are later combined
+4. Prediction + ensembling
 
-6. Alarm policy simulation
-   Different rules are tested for triggering alerts (for example, threshold-based triggers). This helps evaluate how often the system would raise alarms and how many would be false positives.
+The 5 models from cross-validation are combined using rank normalization and weighted averaging.
 
-7. Analysis and evaluation
-   The pipeline computes performance metrics such as AUC and also evaluates fairness across groups like age, sex, and ICU stay length.
+Then the final prediction is a blend of:
 
----
+LightGBM (main model)
+logistic regression (adds some linear signal)
+What makes this project different
+Uncertainty module
 
-## Project structure
+Instead of trusting every prediction equally, the model checks how much the different folds disagree.
 
-The main code lives in the `star_ai_pipeline` folder:
+if all models agree → prediction is more reliable
+if they disagree → prediction is uncertain
 
-* `data_loader.py` handles loading and preparing the dataset
-* `features.py` builds features from raw data
-* `train.py` trains the model
-* `predict.py` runs inference
-* `uncertainty_module.py` measures prediction uncertainty
-* `alarm_policy_engine.py` simulates alert strategies
-* `analysis.py` computes metrics and evaluations
-* `equity_dashboard.py` looks at fairness across subgroups
-* `run_pipeline.py` ties everything together
+Uncertain cases can be flagged instead of blindly acted on.
 
-There are also:
+Alarm policy simulation
 
-* `results/` for outputs (not included in the repo)
-* `logs/` for runtime logs (not included)
-* small reference CSV files to help understand variables
+The model output is used to simulate different alert strategies, like:
 
-Large datasets and generated outputs are intentionally excluded from the repository.
+trigger alert if risk > threshold
+require both high risk and abnormal vitals
+multi-organ failure triggers
 
----
+Each policy is evaluated based on:
 
-## How to run the project
+how many real cases it catches
+how many false alarms it produces
 
-1. Clone the repository
+This is important because too many false alarms leads to alarm fatigue in ICUs.
 
-```
+Fairness analysis
+
+The model is evaluated across different groups:
+
+age
+sex
+ICU stay length
+
+This helps check if the model performs worse on certain types of patients.
+
+Results (high level)
+Cross-validation AUC: ~0.87
+Kaggle public AUC: ~0.95
+
+Some observations:
+
+recent vital signs (last values) are very important
+missing data is actually informative
+simple models like logistic regression still perform well
+Notes on data
+
+The full dataset is not included in this repo because:
+
+it’s very large
+it contains sensitive clinical data
+
+Only small reference files are included. Everything else is excluded using .gitignore.
+
+Limitations
+performance is worse for short ICU stays (not enough data early on)
+data comes from a single hospital
+not a real-time system (works on full patient stays)
+How to run
 git clone https://github.com/aryabhanushali/STARAI-ICU-Alarm.git
 cd STARAI-ICU-Alarm
-```
-
-2. Install dependencies
-
-```
 pip install -r requirements.txt
-```
-
-3. Run the pipeline
-
-```
 python star_ai_pipeline/run_pipeline.py
-```
-
-Note: The original HiRID dataset is not included due to size and access restrictions. You will need to provide your own data in the expected format.
-
----
-
-## Results and evaluation
-
-The model is evaluated using AUC, which is the main metric used in the competition. In addition to that, the project looks at:
-
-* Model disagreement as a measure of uncertainty
-* Tradeoffs between true positives and false alarms under different alarm policies
-* Performance differences across patient subgroups
-
-This makes it possible to understand not just how accurate the model is, but also how reliable and usable it would be in practice.
-
----
-
-## Notes on data
-
-This repository does not include the full dataset. The HiRID dataset is large and contains sensitive clinical information, so only small reference files are included.
-
-Anything that is large, generated, or potentially sensitive (such as processed patient data or model outputs) is excluded using `.gitignore`.
-
----
-
-## Future improvements
-
-Some directions for improvement include:
-
-* Modeling intermediate deterioration signals (e.g., respiratory or circulatory failure)
-* Improving feature engineering for time-series data
-* Exploring sequence models like LSTMs or Transformers
-* Designing more adaptive alarm policies
-* Improving uncertainty estimation with better calibration
-
----
-
-## Summary
-
-This project builds a mortality prediction system that goes beyond a standard ML model by focusing on uncertainty, alarm design, and fairness. It is designed to reflect the kinds of considerations that matter in real clinical systems, not just benchmark performance.
